@@ -148,8 +148,6 @@ void app_main(void)
     uint16_t model = 0x9340;
 
     lcdInit(&dev, model, CONFIG_WIDTH, CONFIG_HEIGHT, CONFIG_OFFSETX, CONFIG_OFFSETY);
-    
-    lcdFillScreen(&dev, BLACK);
 
     ESP_ERROR_CHECK(mountSPIFFS("/gifs", "storage0", 1));
     listSPIFFS("/gifs/");

@@ -27,6 +27,10 @@
 
 #define SPI_DEFAULT_FREQUENCY SPI_MASTER_FREQ_10M; // 10MHz
 
+#define NUM_TRANSACTIONS 20
+#define CHUNK_PIXELS 4096
+#define CHUNK_BYTES (CHUNK_PIXELS * 2)
+
 //static const int TFT_MOSI = 23;
 //static const int TFT_SCLK = 18;
 
@@ -116,7 +120,7 @@ void spi_master_init(TFT_t * dev, int16_t TFT_MOSI, int16_t TFT_SCLK, int16_t TF
 		//.clock_speed_hz = SPI_Frequency,
 		.clock_speed_hz = clock_speed_hz,
 		.spics_io_num = TFT_CS,
-		.queue_size = 7,
+		.queue_size = NUM_TRANSACTIONS,
 		.flags = SPI_DEVICE_NO_DUMMY,
 	};
 
@@ -264,16 +268,38 @@ bool spi_master_write_color(TFT_t * dev, uint16_t color, uint16_t size)
 	return spi_master_write_byte( dev->_TFT_Handle, Byte, size*2);
 }
 
-bool spi_master_write_colors(TFT_t * dev, uint16_t * colors, uint32_t size)
+bool spi_master_write_colors(TFT_t *dev, uint16_t *colors, uint32_t size)
 {
+    static spi_transaction_t trans[NUM_TRANSACTIONS];
+    
     gpio_set_level(dev->_dc, SPI_Data_Mode);
     
     uint32_t offset = 0;
-    while (offset < size) {
-        uint32_t chunk = size - offset;
-        if (chunk > 4096) chunk = 4096;  // 4096 pixels = 8192 bytes = 65536 bits (hardware max)
-        spi_master_write_byte(dev->_TFT_Handle, (uint8_t *)(colors + offset), chunk * 2);
-        offset += chunk;
+    int queued = 0;
+    
+    while (offset < size || queued > 0) {
+        // Queue new transactions while there are pixels left and slots available
+        if (offset < size && queued < NUM_TRANSACTIONS) {
+            uint32_t chunk = size - offset;
+            if (chunk > CHUNK_PIXELS) chunk = CHUNK_PIXELS;
+            
+            spi_transaction_t *t = &trans[queued % NUM_TRANSACTIONS];
+            memset(t, 0, sizeof(spi_transaction_t));
+            t->length = chunk * 2 * 8;  // bits
+            t->tx_buffer = (uint8_t *)(colors + offset);
+            t->user = NULL;
+            
+            spi_device_queue_trans(dev->_TFT_Handle, t, portMAX_DELAY);
+            offset += chunk;
+            queued++;
+        }
+        
+        // Collect finished transactions
+        if (queued == NUM_TRANSACTIONS || offset >= size) {
+            spi_transaction_t *done;
+            spi_device_get_trans_result(dev->_TFT_Handle, &done, portMAX_DELAY);
+            queued--;
+        }
     }
     return true;
 }
