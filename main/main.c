@@ -85,6 +85,88 @@ err:
     return ret;
 }
 
+int compare_filenames(const void *a, const void *b) {
+    return strcmp(*(const char **)a, *(const char **)b);
+}
+
+esp_err_t play_gif_frames(TFT_t * dev, char * folder, int width, int height, int frame_delay_ms) {
+    esp_err_t ret = ESP_OK;
+
+    // list file paths in folder and sort
+    DIR *dir = opendir(folder);
+    if (dir == NULL) {
+        ESP_LOGE(__FUNCTION__, "Failed to open folder: %s", folder);
+        ret = ESP_FAIL;
+        return ret;
+    }
+
+    int file_count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        const char *ext = strrchr(entry->d_name, '.');
+        if (ext && (strcasecmp(ext, ".gif") == 0)) {
+            file_count++;
+        }
+    }
+    if (file_count == 0) {
+        ESP_LOGE(__FUNCTION__, "No GIF files found in %s", folder);
+        closedir(dir);
+        ret = ESP_FAIL;
+        return ret;
+    }
+
+    char **filenames = (char **)malloc(sizeof(char *) * file_count);
+    if (filenames == NULL) {
+        ESP_LOGE(__FUNCTION__, "malloc fail for filenames array");
+        closedir(dir);
+        ret = ESP_FAIL;
+        return ret;
+    }
+
+    rewinddir(dir);
+    int idx = 0;
+    while ((entry = readdir(dir)) != NULL && idx < file_count) {
+        const char *ext = strrchr(entry->d_name, '.');
+        if (ext && (strcasecmp(ext, ".gif") == 0)) {
+            filenames[idx] = strdup(entry->d_name);
+            if (filenames[idx] == NULL) {
+                ESP_LOGE(__FUNCTION__, "strdup fail");
+                // cleanup already allocated
+                for (int i = 0; i < idx; i++) free(filenames[i]);
+                free(filenames);
+                closedir(dir);
+                ret = ESP_FAIL;
+                return ret;
+            }
+            idx++;
+        }
+    }
+    closedir(dir);
+
+    qsort(filenames, file_count, sizeof(char *), compare_filenames);
+    // for each file path display image
+    char filepath[256];
+    for (int i = 0; i < file_count; i++) {
+        snprintf(filepath, sizeof(filepath), "%s/%s", folder, filenames[i]);
+        ret = display_image(dev, filepath, width, height);
+        if (ret != ESP_OK) {
+            for (int i = 0; i < idx; i++) free(filenames[i]);
+            free(filenames);
+            ret = ESP_FAIL;
+            return ret;
+        }
+
+        if (frame_delay_ms > 0) {
+            vTaskDelay(pdMS_TO_TICKS(frame_delay_ms));
+        }
+    }
+
+    // cleanup and exit
+    for (int i = 0; i < idx; i++) free(filenames[i]);
+    free(filenames);
+    return ret;
+}
+
 static void listSPIFFS(char * path) {
 	DIR* dir = opendir(path);
 	assert(dir != NULL);
@@ -152,11 +234,10 @@ void app_main(void)
     ESP_ERROR_CHECK(mountSPIFFS("/gifs", "storage0", 1));
     listSPIFFS("/gifs/");
 
-    char file[64];
-    strcpy(file, "/gifs/frame_00_delay-0.1s.gif");
-    display_image(&dev, file, CONFIG_WIDTH, CONFIG_HEIGHT);
+    char folder[64];
+    strcpy(folder, "/gifs");
 
     while (1) {
-        vTaskDelay(1000);
+        play_gif_frames(&dev, folder, CONFIG_WIDTH, CONFIG_HEIGHT, 1);
     }
 }
