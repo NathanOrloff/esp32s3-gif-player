@@ -9,9 +9,15 @@
 #include "nvs.h"
 #include "esp_vfs.h"
 #include "esp_spiffs.h"
+#include "driver/sdspi_host.h"
+#include "esp_vfs_fat.h"
+#include "sdmmc_cmd.h"
 
 #include "gifdec.h"
 #include "ili9340.h"
+#include "spi.h"
+
+#define SD_MOUNT_POINT "/sdcard"
 
 static const char *TAG = "MAIN";
 
@@ -213,19 +219,46 @@ esp_err_t mountSPIFFS(char * path, char * label, int max_files) {
 	return ret;
 }
 
+esp_err_t add_sd_card_spi_device(spi_host_device_t host) {
+    esp_err_t ret = ESP_OK;
+    sdmmc_card_t *card;
+
+    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+        .format_if_mount_failed = false,
+        .max_files = 5,
+        .allocation_unit_size = 16 * 1024
+    };
+
+    sdmmc_host_t sd_host = SDSPI_HOST_DEFAULT();
+    sd_host.slot = host;
+
+    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
+    slot_config.gpio_cs = CONFIG_MINI_SD_CS_GPIO;
+    slot_config.host_id = host;
+
+    ret = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &sd_host, &slot_config, &mount_config, &card);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize SD card (%s).", esp_err_to_name(ret));
+        return ret;
+    }
+
+    sdmmc_card_print_info(stdout, card);
+    return ret;
+}
+
 void app_main(void)
 {
+    esp_err_t ret = ESP_OK;
     TFT_t dev;
 
-	int XPT_MISO_GPIO = -1;
-	int XPT_CS_GPIO = -1;
-	int XPT_IRQ_GPIO = -1;
-	int XPT_SCLK_GPIO = -1;
-	int XPT_MOSI_GPIO = -1;
+    spi_set_clock_speed(SPI_MASTER_FREQ_40M);
 
-    spi_clock_speed(SPI_MASTER_FREQ_40M);
-    spi_master_init(&dev, CONFIG_MOSI_GPIO, CONFIG_SCLK_GPIO, CONFIG_TFT_CS_GPIO, CONFIG_DC_GPIO, 
-		CONFIG_RESET_GPIO, CONFIG_BL_GPIO, XPT_MISO_GPIO, XPT_CS_GPIO, XPT_IRQ_GPIO, XPT_SCLK_GPIO, XPT_MOSI_GPIO);
+    // --- SPI bus init ---
+    ret = spi_bus_init(SPI_HOST_ID, CONFIG_MOSI_GPIO, CONFIG_MISO_GPIO, CONFIG_SCLK_GPIO, 8192);
+    assert(ret == ESP_OK);
+
+    add_tft_spi_device(&dev, CONFIG_TFT_CS_GPIO, CONFIG_DC_GPIO, CONFIG_RESET_GPIO, CONFIG_BL_GPIO);
+    add_sd_card_spi_device(SPI_HOST_ID);
 
     uint16_t model = 0x9340;
 

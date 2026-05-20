@@ -12,201 +12,63 @@
 #include "esp_log.h"
 
 #include "ili9340.h"
+#include "spi.h"
 
 #define TAG "ILI9340"
 #define	_DEBUG_ 0
-
-#if CONFIG_SPI2_HOST
-#define TFT_ID SPI2_HOST
-#elif CONFIG_SPI3_HOST
-#define TFT_ID SPI3_HOST
-#else
-#define TFT_ID SPI2_HOST // When not to use menuconfig
-#define XPT_ID SPI3_HOST // When not to use menuconfig
-#endif
-
-#define SPI_DEFAULT_FREQUENCY SPI_MASTER_FREQ_10M; // 10MHz
 
 #define NUM_TRANSACTIONS 20
 #define CHUNK_PIXELS 4096
 #define CHUNK_BYTES (CHUNK_PIXELS * 2)
 
-//static const int TFT_MOSI = 23;
-//static const int TFT_SCLK = 18;
-
 static const int SPI_Command_Mode = 0;
 static const int SPI_Data_Mode = 1;
-//static const int SPI_Frequency = SPI_MASTER_FREQ_10M;
-//static const int SPI_Frequency = SPI_MASTER_FREQ_20M;
-//static const int SPI_Frequency = SPI_MASTER_FREQ_26M;
-//static const int SPI_Frequency = SPI_MASTER_FREQ_40M;
-
-int clock_speed_hz = SPI_DEFAULT_FREQUENCY;
 
 #if CONFIG_XPT2046_ENABLE_SAME_BUS || CONFIG_XPT2046_ENABLE_DIFF_BUS
-static const int XPT_Frequency = 1*1000*1000;
-//static const int XPT_Frequency = 2*1000*1000;
-//static const int XPT_Frequency = 4*1000*1000;
 
-//#define XPT_MISO 19
-//#define XPT_CS	4
-//#define XPT_IRQ 5
 #endif
 
-void spi_clock_speed(int speed) {
-	ESP_LOGI(TAG, "SPI clock speed=%d MHz", speed/1000000);
-	clock_speed_hz = speed;
-}
-
-void spi_master_init(TFT_t * dev, int16_t TFT_MOSI, int16_t TFT_SCLK, int16_t TFT_CS, int16_t GPIO_DC, int16_t GPIO_RESET, int16_t GPIO_BL,
-	int16_t XPT_MISO, int16_t XPT_CS, int16_t XPT_IRQ, int16_t XPT_SCLK, int16_t XPT_MOSI)
+void add_tft_spi_device(TFT_t *dev, int16_t TFT_CS, int16_t GPIO_DC, int16_t GPIO_RESET, int16_t GPIO_BL)
 {
-	esp_err_t ret;
+    esp_err_t ret;
 
-	ESP_LOGI(TAG, "TFT_MOSI=%d",TFT_MOSI);
-	ESP_LOGI(TAG, "TFT_SCLK=%d",TFT_SCLK);
-	ESP_LOGI(TAG, "TFT_CS=%d",TFT_CS);
-	gpio_reset_pin( TFT_CS );
-	gpio_set_direction( TFT_CS, GPIO_MODE_OUTPUT );
-	//gpio_set_level( TFT_CS, 0 );
-	gpio_set_level( TFT_CS, 1 );
+    // --- TFT-specific GPIO setup ---
+    gpio_reset_pin(TFT_CS);
+    gpio_set_direction(TFT_CS, GPIO_MODE_OUTPUT);
+    gpio_set_level(TFT_CS, 1);
 
-	ESP_LOGI(TAG, "GPIO_DC=%d",GPIO_DC);
-	gpio_reset_pin( GPIO_DC );
-	gpio_set_direction( GPIO_DC, GPIO_MODE_OUTPUT );
-	gpio_set_level( GPIO_DC, 0 );
+    gpio_reset_pin(GPIO_DC);
+    gpio_set_direction(GPIO_DC, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_DC, 0);
 
-	ESP_LOGI(TAG, "GPIO_RESET=%d",GPIO_RESET);
-	if ( GPIO_RESET >= 0 ) {
-		gpio_reset_pin( GPIO_RESET );
-		gpio_set_direction( GPIO_RESET, GPIO_MODE_OUTPUT );
-		gpio_set_level( GPIO_RESET, 0 );
-		vTaskDelay( pdMS_TO_TICKS( 100 ) );
-		gpio_set_level( GPIO_RESET, 1 );
-	}
+    if (GPIO_RESET >= 0) {
+        gpio_reset_pin(GPIO_RESET);
+        gpio_set_direction(GPIO_RESET, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_RESET, 0);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        gpio_set_level(GPIO_RESET, 1);
+    }
 
-	ESP_LOGI(TAG, "GPIO_BL=%d",GPIO_BL);
-	if ( GPIO_BL >= 0 ) {
-		gpio_reset_pin( GPIO_BL );
-		gpio_set_direction( GPIO_BL, GPIO_MODE_OUTPUT );
-		gpio_set_level( GPIO_BL, 0 );
-	}
+    if (GPIO_BL >= 0) {
+        gpio_reset_pin(GPIO_BL);
+        gpio_set_direction(GPIO_BL, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_BL, 0);
+    }
 
-#if CONFIG_XPT2046_ENABLE_SAME_BUS
-	spi_bus_config_t tft_buscfg = {
-		.sclk_io_num = TFT_SCLK,
-		.mosi_io_num = TFT_MOSI,
-		.miso_io_num = XPT_MISO,
-		.quadwp_io_num = -1,
-		.quadhd_io_num = -1
-		.max_transfer_sz = 8192
-	};
-#else
-	spi_bus_config_t tft_buscfg = {
-		.sclk_io_num = TFT_SCLK,
-		.mosi_io_num = TFT_MOSI,
-		.miso_io_num = -1,
-		.quadwp_io_num = -1,
-		.quadhd_io_num = -1,
-		.max_transfer_sz = 8192
-	};
-#endif
+    // --- Add TFT device ---
+    spi_device_params_t tft_params = {
+        .cs              = TFT_CS,
+        .clock_speed_hz  = spi_get_clock_speed(),
+        .queue_size      = NUM_TRANSACTIONS,
+        .flags           = SPI_DEVICE_NO_DUMMY,
+    };
+    spi_device_handle_t tft_handle;
+    ret = spi_bus_add_dev(SPI_HOST_ID, &tft_params, &tft_handle);
+    assert(ret == ESP_OK);
 
-	ret = spi_bus_initialize( TFT_ID, &tft_buscfg, SPI_DMA_CH_AUTO );
-	ESP_LOGI(TAG, "spi_bus_initialize(TFT) ret=%d TFT_ID=%d",ret, TFT_ID);
-	assert(ret==ESP_OK);
-
-	spi_device_interface_config_t tft_devcfg={
-		//.clock_speed_hz = SPI_Frequency,
-		.clock_speed_hz = clock_speed_hz,
-		.spics_io_num = TFT_CS,
-		.queue_size = NUM_TRANSACTIONS,
-		.flags = SPI_DEVICE_NO_DUMMY,
-	};
-
-	spi_device_handle_t tft_handle;
-	ret = spi_bus_add_device( TFT_ID, &tft_devcfg, &tft_handle);
-	ESP_LOGD(TAG, "spi_bus_add_device=%d",ret);
-	assert(ret==ESP_OK);
-	dev->_dc = GPIO_DC;
-	dev->_bl = GPIO_BL;
-	dev->_TFT_Handle = tft_handle;
-
-#if CONFIG_XPT2046_ENABLE_DIFF_BUS
-	ESP_LOGI(TAG, "XPT_SCLK=%d",XPT_SCLK);
-	ESP_LOGI(TAG, "XPT_MOSI=%d",XPT_MOSI);
-	ESP_LOGI(TAG, "XPT_MISO=%d",XPT_MISO);
-	spi_bus_config_t xpt_buscfg = {
-		.sclk_io_num = XPT_SCLK,
-		.mosi_io_num = XPT_MOSI,
-		.miso_io_num = XPT_MISO,
-		.quadwp_io_num = -1,
-		.quadhd_io_num = -1
-	};
-
-	ret = spi_bus_initialize( XPT_ID, &xpt_buscfg, SPI_DMA_CH_AUTO );
-	ESP_LOGI(TAG, "spi_bus_initialize(XPT) ret=%d XPT_ID=%d",ret, XPT_ID);
-	assert(ret==ESP_OK);
-#endif
-
-#if CONFIG_XPT2046_ENABLE_SAME_BUS || CONFIG_XPT2046_ENABLE_DIFF_BUS
-	ESP_LOGI(TAG, "XPT_CS=%d",XPT_CS);
-	gpio_reset_pin( XPT_CS );
-	gpio_set_direction( XPT_CS, GPIO_MODE_OUTPUT );
-	gpio_set_level( XPT_CS, 1 );
-
-	// set the IRQ as a input
-	ESP_LOGI(TAG, "XPT_IRQ=%d",XPT_IRQ);
-	gpio_config_t io_conf = {};
-	io_conf.intr_type = GPIO_INTR_DISABLE;
-	io_conf.pin_bit_mask = (1ULL<<XPT_IRQ);
-	io_conf.mode = GPIO_MODE_INPUT;
-	io_conf.pull_up_en = 1;
-	gpio_config(&io_conf);
-	//gpio_reset_pin( XPT_IRQ );
-	//gpio_set_direction( XPT_IRQ, GPIO_MODE_DEF_INPUT );
-
-	spi_device_interface_config_t xpt_devcfg={
-		.clock_speed_hz = XPT_Frequency,
-		.spics_io_num = XPT_CS,
-		.queue_size = 7,
-		.flags = SPI_DEVICE_NO_DUMMY,
-	};
-
-	spi_device_handle_t xpt_handle;
-#if CONFIG_XPT2046_ENABLE_SAME_BUS
-	ret = spi_bus_add_device( TFT_ID, &xpt_devcfg, &xpt_handle);
-#else
-	ret = spi_bus_add_device( XPT_ID, &xpt_devcfg, &xpt_handle);
-#endif
-	ESP_LOGD(TAG, "spi_bus_add_device=%d",ret);
-	assert(ret==ESP_OK);
-	dev->_XPT_Handle = xpt_handle;
-	dev->_irq = XPT_IRQ;
-	dev->_calibration = true;
-#endif
-}
-
-
-bool spi_master_write_byte(spi_device_handle_t SPIHandle, const uint8_t* Data, size_t DataLength)
-{
-	spi_transaction_t SPITransaction;
-	esp_err_t ret;
-
-	if ( DataLength > 0 ) {
-		memset( &SPITransaction, 0, sizeof( spi_transaction_t ) );
-		SPITransaction.length = DataLength * 8;
-		SPITransaction.tx_buffer = Data;
-#if 1
-		ret = spi_device_transmit( SPIHandle, &SPITransaction );
-#endif
-#if 0
-		ret = spi_device_polling_transmit( SPIHandle, &SPITransaction );
-#endif
-		assert(ret==ESP_OK); 
-	}
-
-	return true;
+    dev->_dc         = GPIO_DC;
+    dev->_bl         = GPIO_BL;
+    dev->_TFT_Handle = tft_handle;
 }
 
 bool spi_master_write_comm_byte(TFT_t * dev, uint8_t cmd)
@@ -303,7 +165,6 @@ bool spi_master_write_colors(TFT_t *dev, uint16_t *colors, uint32_t size)
     }
     return true;
 }
-
 
 void delayMS(int ms) {
 	int _ms = ms + (portTICK_PERIOD_MS - 1);

@@ -2,6 +2,6 @@ set(srcs "ili9340.c")
 
 idf_component_register(
 	SRCS "${srcs}"
-	PRIV_REQUIRES driver esp_driver_spi esp_driver_gpio
+	PRIV_REQUIRES driver esp_driver_spi esp_driver_gpio spi
 	INCLUDE_DIRS "."
 )

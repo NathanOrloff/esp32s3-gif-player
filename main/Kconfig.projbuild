@@ -1,0 +1,24 @@
+menu "Mini SD Card Configuration"
+
+	config MINI_SD_GPIO_RANGE_MAX
+		int
+		default 39 if IDF_TARGET_ESP32
+		default 46 if IDF_TARGET_ESP32S2
+		default 48 if IDF_TARGET_ESP32S3
+		default 18 if IDF_TARGET_ESP32C2
+		default 19 if IDF_TARGET_ESP32C3
+		default 30 if IDF_TARGET_ESP32C6
+
+	config MINI_SD_CS_GPIO
+		int "CS GPIO number"
+		range 0 GPIO_RANGE_MAX
+		default 14 if IDF_TARGET_ESP32
+		default 34 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
+		default  2 # C3 and others
+		help
+			GPIO number (IOxx) to TFT CS.
+			Some GPIOs are used for other purposes (flash connections, etc.) and cannot be used to CS.
+			On the ESP32, GPIOs 35-39 are input-only so cannot be used as outputs.
+			On the ESP32-S2, GPIO 46 is input-only so cannot be used as outputs.
+
+endmenu
