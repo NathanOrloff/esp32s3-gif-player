@@ -4,6 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_log.h"
+
+#define TAG "GIFDEC"
+
 #define MIN(A, B) ((A) < (B) ? (A) : (B))
 #define MAX(A, B) ((A) > (B) ? (A) : (B))
 
@@ -40,31 +44,31 @@ gd_open_gif(const char *fname)
 
     fd = fopen(fname, "rb");
     if (fd == NULL) {
-        fprintf(stderr, "gd_open_gif: fopen failed\n");
+        ESP_LOGD(TAG, "gd_open_gif: fopen failed");
         return NULL;
     }
     /* Header */
     fread(sigver, 1, 3, fd);
     if (memcmp(sigver, "GIF", 3) != 0) {
-        fprintf(stderr, "gd_open_gif: invalid signature: %c%c%c\n", sigver[0], sigver[1], sigver[2]);
+        ESP_LOGD(TAG, "gd_open_gif: invalid signature: %c%c%c\n", sigver[0], sigver[1], sigver[2]);
         goto fail;
     }
     /* Version */
     fread(sigver, 1, 3, fd);
     if (memcmp(sigver, "89a", 3) != 0) {
-        fprintf(stderr, "gd_open_gif: invalid version: %c%c%c\n", sigver[0], sigver[1], sigver[2]);
+        ESP_LOGD(TAG, "gd_open_gif: invalid version: %c%c%c\n", sigver[0], sigver[1], sigver[2]);
         goto fail;
     }
     /* Width x Height */
     width  = read_num(fd);
     height = read_num(fd);
-    fprintf(stderr, "gd_open_gif: width=%d height=%d\n", width, height);
+    ESP_LOGD(TAG, "gd_open_gif: width=%d height=%d\n", width, height);
     /* FDSZ */
     fread(&fdsz, 1, 1, fd);
-    fprintf(stderr, "gd_open_gif: fdsz=0x%02X\n", fdsz);
+    ESP_LOGD(TAG, "gd_open_gif: fdsz=0x%02X\n", fdsz);
     /* Presence of GCT */
     if (!(fdsz & 0x80)) {
-        fprintf(stderr, "gd_open_gif: no global color table\n");
+        ESP_LOGD(TAG, "gd_open_gif: no global color table\n");
         goto fail;
     }
     /* Color Space's Depth */
@@ -72,7 +76,7 @@ gd_open_gif(const char *fname)
     /* Ignore Sort Flag. */
     /* GCT Size */
     gct_sz = 1 << ((fdsz & 0x07) + 1);
-    fprintf(stderr, "gd_open_gif: depth=%d gct_sz=%d\n", depth, gct_sz);
+    ESP_LOGD(TAG, "gd_open_gif: depth=%d gct_sz=%d\n", depth, gct_sz);
     /* Background Color Index */
     fread(&bgidx, 1, 1, fd);
     /* Aspect Ratio */
@@ -80,7 +84,7 @@ gd_open_gif(const char *fname)
     /* Create gd_GIF Structure. */
     gif = calloc(1, sizeof(*gif));
     if (!gif) {
-        fprintf(stderr, "gd_open_gif: calloc gif failed\n");
+        ESP_LOGD(TAG, "gd_open_gif: calloc gif failed\n");
         goto fail;
     }
     gif->fd = fd;
@@ -95,7 +99,7 @@ gd_open_gif(const char *fname)
     /* Allocate frame only (no canvas) - 75KB instead of 300KB */
     gif->frame = calloc(1, width * height);
     if (!gif->frame) {
-        fprintf(stderr, "gd_open_gif: calloc frame failed (size=%d)\n", width * height);
+        ESP_LOGD(TAG, "gd_open_gif: calloc frame failed (size=%d)\n", width * height);
         free(gif);
         goto fail;
     }
@@ -103,7 +107,7 @@ gd_open_gif(const char *fname)
     if (gif->bgindex)
         memset(gif->frame, gif->bgindex, gif->width * gif->height);
     gif->anim_start = ftell(fd);
-    fprintf(stderr, "gd_open_gif: success, anim_start=%ld\n", gif->anim_start);
+    ESP_LOGD(TAG, "gd_open_gif: success, anim_start=%ld\n", gif->anim_start);
     goto ok;
 fail:
     fclose(fd);
@@ -227,7 +231,7 @@ read_ext(gd_GIF *gif)
         read_application_ext(gif);
         break;
     default:
-        fprintf(stderr, "unknown extension: %02X\n", label);
+        ESP_LOGD(TAG, "unknown extension: %02X\n", label);
     }
 }
 
