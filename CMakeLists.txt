@@ -6,5 +6,3 @@ cmake_minimum_required(VERSION 3.16)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp-gif-player)
-
-spiffs_create_partition_image(storage0 gifs FLASH_IN_PROJECT)
